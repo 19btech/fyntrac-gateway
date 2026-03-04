@@ -1,0 +1,54 @@
+plugins {
+    id 'java'
+    id 'org.springframework.boot' version '3.4.2'
+    id 'io.spring.dependency-management' version '1.1.7'
+}
+
+group = 'com.fyntrac'
+version = '0.0.2-SNAPSHOT'
+
+java {
+    toolchain {
+        languageVersion = JavaLanguageVersion.of(21)
+    }
+}
+
+repositories {
+    mavenCentral()
+}
+
+ext {
+    set('springCloudVersion', '2024.0.0')
+}
+
+dependencyManagement {
+    imports {
+        mavenBom "org.springframework.cloud:spring-cloud-dependencies:${springCloudVersion}"
+    }
+}
+
+dependencies {
+    // Spring Cloud Gateway (reactive / WebFlux)
+    implementation 'org.springframework.cloud:spring-cloud-starter-gateway'
+
+    // WebFlux (WebClient for calling Zitadel & downstream services)
+    implementation 'org.springframework.boot:spring-boot-starter-webflux'
+
+    // OAuth2 Client (OIDC login with Zitadel)
+    implementation 'org.springframework.boot:spring-boot-starter-oauth2-client'
+
+    // Reactive security
+    implementation 'org.springframework.boot:spring-boot-starter-security'
+
+    // Actuator for health checks
+    implementation 'org.springframework.boot:spring-boot-starter-actuator'
+
+    // Test
+    testImplementation 'org.springframework.boot:spring-boot-starter-test'
+    testImplementation 'org.springframework.security:spring-security-test'
+    testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+}
+
+tasks.named('test') {
+    useJUnitPlatform()
+}
