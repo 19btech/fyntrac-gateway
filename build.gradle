@@ -2,10 +2,11 @@ plugins {
     id 'java'
     id 'org.springframework.boot' version '3.4.2'
     id 'io.spring.dependency-management' version '1.1.7'
+    id 'com.bmuschko.docker-java-application' version '9.3.4'
 }
 
 group = 'com.fyntrac'
-version = '0.0.2-SNAPSHOT'
+version = '0.0.3-SNAPSHOT'
 
 java {
     toolchain {
@@ -19,6 +20,9 @@ repositories {
 
 ext {
     set('springCloudVersion', '2024.0.0')
+    projectname = 'fyntrac-gateway'
+    gituser = System.getenv('GIT_USER')
+    gittoken = System.getenv('GIT_KEY')
 }
 
 dependencyManagement {
@@ -51,4 +55,109 @@ dependencies {
 
 tasks.named('test') {
     useJUnitPlatform()
+}
+
+docker {
+    // url = 'unix:///run/docker.sock'
+    url = 'unix:///var/run/docker.sock'
+    javaApplication {
+        baseImage = 'openjdk:21'
+        mainClassName = 'com.fyntrac.gateway.FyntracGatewayApplication'
+        ports = [8080]
+        images = ["ghcr.io/19btech/fyntrac/docker/fyntrac-gateway:${project.version}"]
+    }
+}
+
+// Task to list buildx builders
+tasks.register('dockerListBuilders', Exec) {
+    commandLine 'docker', 'buildx', 'ls', '--format', '{{.Name}}:{{.Driver}}:{{.Status}}'
+    standardOutput = new ByteArrayOutputStream()
+    ignoreExitValue = true
+    doLast {
+        project.ext.dockerListOutput = standardOutput.toString().trim()
+    }
+}
+
+// Task to remove old builder
+tasks.register('dockerRemoveBuilder', Exec) {
+    commandLine 'docker', 'buildx', 'rm', 'multiarch'
+    ignoreExitValue = true
+}
+
+// Task to create new builder
+tasks.register('dockerCreateBuilder', Exec) {
+    commandLine 'docker', 'buildx', 'create', '--name', 'multiarch', '--driver', 'docker-container', '--use'
+}
+
+// Task to select existing builder
+tasks.register('dockerUseBuilder', Exec) {
+    commandLine 'docker', 'buildx', 'use', 'multiarch'
+    ignoreExitValue = true
+}
+
+// Task to bootstrap Buildx
+tasks.register('dockerBootstrapBuilder', Exec) {
+    commandLine 'docker', 'buildx', 'inspect', '--bootstrap'
+}
+
+// Main setup task (pure Gradle logic, no exec calls)
+tasks.register('setupDockerBuildx') {
+    dependsOn 'dockerListBuilders'
+    doLast {
+        def output = project.ext.dockerListOutput ?: ''
+        def hasContainerDriver = output.readLines().any { line ->
+            line.contains('docker-container') && line.contains('running')
+        }
+
+        if (!hasContainerDriver) {
+            logger.lifecycle("\uD83D\uDD27 Creating multi-platform builder with container driver...")
+            tasks.named('dockerRemoveBuilder').get().exec()
+            tasks.named('dockerCreateBuilder').get().exec()
+        } else {
+            logger.lifecycle("\uD83D\uDD27 Using existing multi-platform builder...")
+            tasks.named('dockerUseBuilder').get().exec()
+        }
+
+        tasks.named('dockerBootstrapBuilder').get().exec()
+        logger.lifecycle("\u2705 Docker Buildx ready for multi-platform builds")
+    }
+}
+
+tasks.named('dockerBuildImage').configure {
+    dependsOn tasks.named('setupDockerBuildx')
+    dependsOn tasks.named('clean')
+    dependsOn tasks.named('build')
+
+    tasks.named('build').get().mustRunAfter(tasks.named('clean').get())
+    noCache = true
+    // \u2705 Correct usage: Map of build args
+    buildArgs.set([
+            'PLATFORM'   : project.findProperty('platform') ?: 'linux/amd64,linux/arm64',
+            'BUILDER'    : 'multiarch',
+            'PROVENANCE' : 'false'
+    ])
+}
+
+
+// Add this after your docker configuration
+tasks.named('dockerPushImage') {
+    dependsOn dockerBuildImage
+
+    doFirst {
+        def gitUser = System.getenv("GIT_USER")
+        def gitKey = System.getenv("GIT_KEY")
+
+        if (!gitUser || !gitKey) {
+            throw new GradleException("GIT_USER or GIT_KEY environment variables not set")
+        }
+
+        def loginProcess = new ProcessBuilder("sh", "-c", "echo ${gitKey} | docker login ghcr.io -u ${gitUser} --password-stdin")
+                .redirectErrorStream(true)
+                .start()
+
+        loginProcess.inputStream.eachLine { println it }
+        if (loginProcess.waitFor() != 0) {
+            throw new GradleException("Docker login to GitHub failed")
+        }
+    }
 }
