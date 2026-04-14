@@ -37,6 +37,9 @@ public class SecurityConfig {
         @Value("${fyntrac.cors.allowed-origins:http://localhost:3030}")
         private String allowedOrigins;
 
+        @Value("${fyntrac.frontend.base-url:http://localhost:3030}")
+        private String frontendBaseUrl;
+
         @Bean
         public SecurityWebFilterChain springSecurityFilterChain(
                         ServerHttpSecurity http,
@@ -62,7 +65,7 @@ public class SecurityConfig {
                                         // After successful login, redirect to the frontend
                                         RedirectServerAuthenticationSuccessHandler successHandler = new RedirectServerAuthenticationSuccessHandler();
                                         successHandler.setLocation(java.net.URI.create(
-                                                        allowedOrigins.split(",")[0].trim() + "?authenticated=true"));
+                                                        frontendBaseUrl.trim() + "?authenticated=true"));
                                         oauth2.authenticationSuccessHandler(successHandler);
                                 })
                                 .oauth2Client(oauth2Client -> {
