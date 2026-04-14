@@ -36,6 +36,9 @@ public class AuthController {
     @Value("${fyntrac.dataloader.base-uri}")
     private String dataloaderBaseUri;
 
+    @Value("${spring.security.oauth2.client.provider.zitadel.issuer-uri}")
+    private String zitadelIssuerUri;
+
     public AuthController(WebClient.Builder webClientBuilder,
                           ReactiveOAuth2AuthorizedClientService authorizedClientService) {
         this.webClient = webClientBuilder.build();
@@ -140,7 +143,7 @@ public class AuthController {
      */
     @SuppressWarnings("unchecked")
     private Mono<Map<String, Object>> fetchUserInfoFromZitadel(String accessToken) {
-        String userInfoUri = "https://fyntrac-auth-q8clqw.us1.zitadel.cloud/oidc/v1/userinfo";
+        String userInfoUri = zitadelIssuerUri + "/oidc/v1/userinfo";
         log.debug("Calling Zitadel userinfo: {}", userInfoUri);
         return webClient.get()
                 .uri(userInfoUri)
