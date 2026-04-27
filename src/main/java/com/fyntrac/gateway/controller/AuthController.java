@@ -237,6 +237,24 @@ public class AuthController {
         return Mono.just(ResponseEntity.ok(oidcUser.getClaims()));
     }
 
+    /**
+     * GET /auth/token
+     * Returns the raw OIDC ID token for cross-app handoff (e.g., opening DSL Studio).
+     * The receiving app can use this token as a Bearer token for API calls.
+     */
+    @GetMapping("/token")
+    public Mono<ResponseEntity<Map<String, Object>>> getIdToken(
+            @AuthenticationPrincipal OidcUser oidcUser) {
+
+        if (oidcUser == null) {
+            return Mono.just(ResponseEntity.status(HttpStatus.UNAUTHORIZED)
+                    .body(Map.of("error", "Not authenticated")));
+        }
+
+        String idToken = oidcUser.getIdToken().getTokenValue();
+        return Mono.just(ResponseEntity.ok(Map.of("token", idToken)));
+    }
+
     // --- Helper ---
 
     private Map<String, Object> buildSessionResponse(
