@@ -11,12 +11,10 @@ import org.springframework.http.HttpStatus;
 import org.springframework.security.config.annotation.web.reactive.EnableWebFluxSecurity;
 import org.springframework.security.config.web.server.ServerHttpSecurity;
 import org.springframework.security.oauth2.client.oidc.userinfo.OidcReactiveOAuth2UserService;
-import org.springframework.security.oauth2.client.oidc.web.server.logout.OidcClientInitiatedServerLogoutSuccessHandler;
-import org.springframework.security.oauth2.client.registration.ReactiveClientRegistrationRepository;
 import org.springframework.security.oauth2.client.userinfo.DefaultReactiveOAuth2UserService;
 import org.springframework.security.web.server.SecurityWebFilterChain;
 import org.springframework.security.web.server.authentication.RedirectServerAuthenticationSuccessHandler;
-import org.springframework.security.web.server.authentication.logout.ServerLogoutSuccessHandler;
+import org.springframework.security.web.server.authentication.logout.RedirectServerLogoutSuccessHandler;
 import org.springframework.web.cors.CorsConfiguration;
 import org.springframework.web.cors.reactive.CorsConfigurationSource;
 import org.springframework.web.cors.reactive.CorsWebFilter;
@@ -42,8 +40,7 @@ public class SecurityConfig {
 
         @Bean
         public SecurityWebFilterChain springSecurityFilterChain(
-                        ServerHttpSecurity http,
-                        ReactiveClientRegistrationRepository clientRegistrationRepository) {
+                        ServerHttpSecurity http) {
 
                 http
                                 .authorizeExchange(exchanges -> exchanges
@@ -72,8 +69,7 @@ public class SecurityConfig {
                                 })
                                 .logout(logout -> logout
                                                 .logoutUrl("/auth/logout")
-                                                .logoutSuccessHandler(
-                                                                oidcLogoutSuccessHandler(clientRegistrationRepository)))
+                                                .logoutSuccessHandler(simpleLogoutSuccessHandler()))
                                 .csrf(csrf -> csrf.disable())
                                 // Disable CORS in security filter chain — handled by CorsWebFilter instead
                                 .cors(cors -> cors.disable())
@@ -87,11 +83,11 @@ public class SecurityConfig {
                 return http.build();
         }
 
-        private ServerLogoutSuccessHandler oidcLogoutSuccessHandler(
-                        ReactiveClientRegistrationRepository clientRegistrationRepository) {
-                OidcClientInitiatedServerLogoutSuccessHandler handler = new OidcClientInitiatedServerLogoutSuccessHandler(
-                                clientRegistrationRepository);
-                handler.setPostLogoutRedirectUri("{baseUrl}");
+        private RedirectServerLogoutSuccessHandler simpleLogoutSuccessHandler() {
+                // Just invalidate the Spring session and redirect to the frontend login page.
+                // Skips OIDC RP-initiated logout to avoid Zitadel redirect URI registration issues.
+                RedirectServerLogoutSuccessHandler handler = new RedirectServerLogoutSuccessHandler();
+                handler.setLogoutSuccessUrl(java.net.URI.create(frontendBaseUrl.trim()));
                 return handler;
         }
 
