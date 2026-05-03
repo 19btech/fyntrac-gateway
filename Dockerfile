@@ -10,6 +10,9 @@ WORKDIR /app
 
 RUN addgroup -S appgroup && adduser -S appuser -G appgroup
 
+# Install wget for Docker healthcheck (eclipse-temurin:alpine has no curl/wget by default)
+RUN apk add --no-cache wget
+
 COPY --from=build /app/build/libs/*.jar app.jar
 
 RUN chown -R appuser:appgroup /app
