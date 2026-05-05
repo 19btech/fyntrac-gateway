@@ -38,56 +38,15 @@ public class TokenRelaySessionFilter implements GlobalFilter, Ordered {
                         if (idToken != null) {
                             log.debug("Relaying ID token to downstream service for path: {}",
                                     exchange.getRequest().getPath());
-                            
-                            // Extract role from ZITADEL claims
-                            String role = extractRoleFromClaims(oidcUser);
-                            log.debug("Extracted role from ZITADEL: {}", role);
-                            
-                            ServerHttpRequest.Builder requestBuilder = exchange.getRequest().mutate()
-                                    .headers(h -> h.setBearerAuth(idToken));
-                            
-                            // Add role as custom header for downstream services
-                            if (role != null && !role.isEmpty()) {
-                                requestBuilder.header("X-User-Role", role);
-                            }
-                            
-                            ServerHttpRequest mutatedRequest = requestBuilder.build();
+                            ServerHttpRequest mutatedRequest = exchange.getRequest().mutate()
+                                    .headers(h -> h.setBearerAuth(idToken))
+                                    .build();
                             return chain.filter(exchange.mutate().request(mutatedRequest).build());
                         }
                     }
                     return chain.filter(exchange);
                 })
                 .switchIfEmpty(chain.filter(exchange));
-    }
-
-    /**
-     * Extract the role from ZITADEL OIDC claims.
-     * ZITADEL stores custom claims in various places:
-     * - "roles" claim (array of role strings)
-     * - Custom attribute in nested structure
-     * - Falls back to "viewer" if not found
-     */
-    private String extractRoleFromClaims(OidcUser oidcUser) {
-        // Try to get roles from standard claims
-        Object rolesObj = oidcUser.getClaim("roles");
-        if (rolesObj instanceof java.util.List<?> rolesList && !rolesList.isEmpty()) {
-            String firstRole = rolesList.get(0).toString();
-            if (!firstRole.isEmpty()) {
-                return firstRole;
-            }
-        }
-        
-        // Try nested attributes or custom claims
-        Object attributes = oidcUser.getClaim("attributes");
-        if (attributes instanceof java.util.Map<?, ?> attrMap) {
-            Object roleAttr = attrMap.get("role");
-            if (roleAttr != null) {
-                return roleAttr.toString();
-            }
-        }
-        
-        // Default fallback
-        return "viewer";
     }
 
     @Override
