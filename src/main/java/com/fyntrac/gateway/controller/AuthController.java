@@ -39,6 +39,15 @@ public class AuthController {
     @Value("${spring.security.oauth2.client.provider.zitadel.issuer-uri}")
     private String zitadelIssuerUri;
 
+    // Mirrors SecurityConfig's flag. When true, Zitadel is bypassed and these
+    // endpoints fake a logged-in dev session instead of requiring an OidcUser.
+    @Value("${AUTH_DISABLED:false}")
+    private boolean authDisabled;
+
+    private static final String DEV_USER_EMAIL = "dev@fyntrac.local";
+    private static final String DEV_USER_NAME = "Dev User (AUTH_DISABLED)";
+    private static final String DEV_USER_SUB = "dev-user";
+
     public AuthController(WebClient.Builder webClientBuilder,
                           ReactiveOAuth2AuthorizedClientService authorizedClientService) {
         this.webClient = webClientBuilder.build();
@@ -66,6 +75,11 @@ public class AuthController {
     public Mono<ResponseEntity<Map<String, Object>>> getSession(
             @AuthenticationPrincipal OidcUser oidcUser,
             WebSession session) {
+
+        if (authDisabled) {
+            log.warn("AUTH_DISABLED=true — returning a fake authenticated dev session (Zitadel bypassed)");
+            return getDevSession(session);
+        }
 
         if (oidcUser == null) {
             return Mono.just(ResponseEntity.ok(Map.of("authenticated", false)));
@@ -201,6 +215,63 @@ public class AuthController {
                 });
     }
     /**
+     * Dev-only bypass path used when AUTH_DISABLED=true. Fakes an authenticated
+     * session under a fixed dev identity, but still fetches the REAL tenant
+     * list from the dataloader service — which itself permits unauthenticated
+     * requests — so the rest of the app (tenant picker, X-Tenant routing)
+     * behaves exactly as it would with Zitadel, minus the login redirect.
+     */
+    private Mono<ResponseEntity<Map<String, Object>>> getDevSession(WebSession session) {
+        @SuppressWarnings("unchecked")
+        List<Map<String, Object>> cachedTenants = (List<Map<String, Object>>) session.getAttributes().get("tenants");
+        if (cachedTenants != null) {
+            return Mono.just(ResponseEntity.ok(buildDevSessionResponse(session, cachedTenants)));
+        }
+
+        Map<String, String> loginBody = new HashMap<>();
+        loginBody.put("email", DEV_USER_EMAIL);
+
+        return webClient.post()
+                .uri(dataloaderBaseUri + "/fyntrac/auth/login")
+                // No Bearer token to relay — dataloader permits unauthenticated requests.
+                .contentType(MediaType.APPLICATION_JSON)
+                .header("X-Tenant", "master")
+                .header("Accept", "application/json")
+                .bodyValue(loginBody)
+                .retrieve()
+                .bodyToMono(Map.class)
+                .map(resp -> {
+                    Object tenants = resp.get("tenants");
+                    Object user = resp.get("user");
+                    session.getAttributes().put("tenants", tenants);
+                    session.getAttributes().put("user", user);
+
+                    @SuppressWarnings("unchecked")
+                    List<Map<String, Object>> tenantList = (List<Map<String, Object>>) tenants;
+                    return ResponseEntity.ok(buildDevSessionResponse(session, tenantList));
+                })
+                .onErrorResume(e -> {
+                    log.error("Failed to fetch tenants for dev session", e);
+                    Map<String, Object> result = buildDevSessionResponse(session, List.of());
+                    result.put("tenantError", "Failed to load tenants: " + e.getMessage());
+                    return Mono.just(ResponseEntity.ok(result));
+                });
+    }
+
+    private Map<String, Object> buildDevSessionResponse(WebSession session, List<Map<String, Object>> tenants) {
+        Map<String, Object> result = new HashMap<>();
+        result.put("authenticated", true);
+        result.put("email", DEV_USER_EMAIL);
+        result.put("name", DEV_USER_NAME);
+        result.put("preferred_username", DEV_USER_EMAIL);
+        result.put("sub", DEV_USER_SUB);
+        result.put("tenant", session.getAttributes().get("selected_tenant"));
+        result.put("tenants", tenants);
+        result.put("user", session.getAttributes().get("user"));
+        return result;
+    }
+
+    /**
      * POST /auth/select-tenant
      */
     @PostMapping("/select-tenant")
@@ -209,7 +280,7 @@ public class AuthController {
             @AuthenticationPrincipal OidcUser oidcUser,
             WebSession session) {
 
-        if (oidcUser == null) {
+        if (!authDisabled && oidcUser == null) {
             return Mono.just(ResponseEntity.status(HttpStatus.UNAUTHORIZED)
                     .body(Map.of("error", "Not authenticated")));
         }
@@ -230,6 +301,10 @@ public class AuthController {
             @AuthenticationPrincipal OidcUser oidcUser) {
 
         if (oidcUser == null) {
+            if (authDisabled) {
+                return Mono.just(ResponseEntity.ok(
+                        Map.of("sub", DEV_USER_SUB, "email", DEV_USER_EMAIL, "name", DEV_USER_NAME)));
+            }
             return Mono.just(ResponseEntity.status(HttpStatus.UNAUTHORIZED)
                     .body(Map.of("error", "Not authenticated")));
         }
@@ -247,6 +322,14 @@ public class AuthController {
             @AuthenticationPrincipal OidcUser oidcUser) {
 
         if (oidcUser == null) {
+            if (authDisabled) {
+                // No real ID token exists in bypass mode. Downstream services
+                // (dataloader, and dsl/insight/py-model when their own
+                // SKIP_AUTH is set) must accept requests without one.
+                return Mono.just(ResponseEntity.ok(Map.of(
+                        "token", "",
+                        "note", "AUTH_DISABLED=true — no real Zitadel ID token is available")));
+            }
             return Mono.just(ResponseEntity.status(HttpStatus.UNAUTHORIZED)
                     .body(Map.of("error", "Not authenticated")));
         }

@@ -38,9 +38,30 @@ public class SecurityConfig {
         @Value("${fyntrac.frontend.base-url:http://localhost:3030}")
         private String frontendBaseUrl;
 
+        // Temporary escape hatch: when true, skip the Zitadel OAuth2 login flow
+        // entirely and permit all requests. OFF by default — must be explicitly
+        // set via the AUTH_DISABLED env var. Never enable in production; pair
+        // with AuthController's same flag so /auth/session still returns a
+        // usable (fake) session for the frontend to proceed past login.
+        @Value("${AUTH_DISABLED:false}")
+        private boolean authDisabled;
+
         @Bean
         public SecurityWebFilterChain springSecurityFilterChain(
                         ServerHttpSecurity http) {
+
+                if (authDisabled) {
+                        log.warn("############################################################################");
+                        log.warn("# AUTH_DISABLED=true — Zitadel login is BYPASSED at the gateway.           #");
+                        log.warn("# All requests are permitted unauthenticated. DO NOT use in production.    #");
+                        log.warn("############################################################################");
+                        http
+                                        .authorizeExchange(exchanges -> exchanges.anyExchange().permitAll())
+                                        .csrf(csrf -> csrf.disable())
+                                        // Disable CORS in security filter chain — handled by CorsWebFilter instead
+                                        .cors(cors -> cors.disable());
+                        return http.build();
+                }
 
                 http
                                 .authorizeExchange(exchanges -> exchanges
